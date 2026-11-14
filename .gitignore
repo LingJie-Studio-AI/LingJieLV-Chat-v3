@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+data/
+ckpt/
+releases/
+logs/
+*.bin
+*.pt
+*.parquet

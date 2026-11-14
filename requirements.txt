@@ -1,0 +1,6 @@
+torch>=2.1
+numpy>=1.24
+tokenizers>=0.15
+pyarrow>=14.0
+Pillow>=10.0
+safetensors>=0.4
