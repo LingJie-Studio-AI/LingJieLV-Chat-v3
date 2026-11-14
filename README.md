@@ -83,7 +83,11 @@ LingJieLV-Chat-v3-Pro-oss/
 │   ├── build.py                  # 按变体选择配置 / LM / VL / 视觉塔 / 词表
 │   ├── data.py                   # 词表封装、预训练/SFT/图文数据集、collate、图像预处理
 │   ├── tool_runtime.py           # 安全表达式求值、取时工具、Agent 工具循环
+│   ├── kv_infer.py               # KV 缓存推理（prefill + 单 token decode）、权重加载
 │   └── infer.py                  # 命令行推理入口（--variant pro|flash）
+├── web/
+│   ├── serve.py                  # 本地推理服务（标准库，无额外 Web 依赖）
+│   └── index.html                # 网页 UI：上传权重、文字/图片、KV 开关
 └── scripts/
     ├── download_data.py          # 按变体下载公开语料 / 视觉塔 / C-Eval
     ├── prep_tokenizer.py         # BPE 词表训练 + 编码 train/val bin
@@ -273,6 +277,18 @@ python3 -m src.infer --variant flash --pack releases/LingJieLV-Chat-v2-Flash/mm_
 
 不带 `--msg` 进入交互模式。
 
+### 网页推理（上传权重 + 文字 / 图片 + KV 加速）
+
+```bash
+python3 web/serve.py              # 默认 http://127.0.0.1:8000，自动开浏览器
+```
+
+浏览器里：上传 `mm_pack.pt`（如词表不在默认路径，再传 `tokenizer.json`）→ 输入文字或上传图片 → 勾选 KV 缓存 → 发送。服务只监听本机回环地址，权重在本地内存加载，不发往任何外部服务器。
+
+- KV 缓存：prompt 一次 prefill 建缓存，之后每个 token 只做单步 decode，避免每步重算整段；关闭开关则退化为整段重算，可用于对照；
+- 两条路径在同一权重上输出逐 token 一致（Flash 实测），KV 路径随序列变长收益越大；
+- 多轮对话在服务端保留，「清空」会重置历史与缓存。
+
 ### 工具协议
 
 模型输出 `【工具调用】{...}`，由 `tool_runtime.py` 中的工具执行：
@@ -289,6 +305,7 @@ python3 -m src.infer --variant flash --pack releases/LingJieLV-Chat-v2-Flash/mm_
 **本仓做了什么**
 
 - 两个变体的完整结构定义、数据集 / collate / 图像预处理、四阶段训练循环、对齐与打包脚本、工具运行时与 CLI 推理；
+- KV 缓存推理与本地网页（上传权重、文字 / 图片、KV 开关、多轮），仅用标准库起服务；
 - 忠实沿用归档链路的结构超参与大方向训练超参；参数规模经构网实测与归档卡一致。
 
 **本仓没做什么**

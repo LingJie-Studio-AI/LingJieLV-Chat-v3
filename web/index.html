@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>凌界 LingJieLV · 本地推理</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+         background: #0f141b; color: #d7dee8; line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { font-size: 20px; font-weight: 650; margin-bottom: 2px; }
+  .sub { color: #7c8aa0; font-size: 13px; margin-bottom: 18px; }
+  .card { background: #171e29; border: 1px solid #243042; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .card h2 { font-size: 14px; font-weight: 600; color: #9fb0c7; margin-bottom: 12px; letter-spacing: .5px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  label.file { flex: 1; min-width: 200px; border: 1px dashed #33435c; border-radius: 8px; padding: 12px;
+               font-size: 13px; color: #8fa2bd; cursor: pointer; text-align: center; transition: .15s; }
+  label.file:hover { border-color: #4a76c4; color: #c3d2e8; }
+  input[type=file] { display: none; }
+  button { background: #2f6fe0; color: #fff; border: 0; border-radius: 8px; padding: 10px 18px;
+           font-size: 14px; font-weight: 600; cursor: pointer; }
+  button:disabled { background: #2a3444; color: #6b788c; cursor: not-allowed; }
+  button.ghost { background: #243042; }
+  #status { font-size: 13px; margin-top: 10px; color: #8fa2bd; }
+  #status.ok { color: #5fd39a; } #status.err { color: #ff7a7a; }
+  #chat { height: 420px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding-right: 4px; }
+  .msg { max-width: 80%; padding: 10px 14px; border-radius: 10px; font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+  .msg.user { background: #2f6fe0; color: #fff; align-self: flex-end; border-bottom-right-radius: 3px; }
+  .msg.bot { background: #222c3b; align-self: flex-start; border-bottom-left-radius: 3px; }
+  .msg img { max-width: 220px; border-radius: 8px; margin-bottom: 6px; display: block; }
+  .meta { font-size: 12px; color: #6f7f96; margin-top: 4px; }
+  .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+  textarea { flex: 1; min-width: 220px; background: #0f1620; border: 1px solid #2c3a50; color: #d7dee8;
+             border-radius: 8px; padding: 10px 12px; font-size: 14px; resize: vertical; min-height: 46px; font-family: inherit; }
+  textarea:focus { outline: none; border-color: #4a76c4; }
+  .opt { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #9fb0c7; }
+  .opt input[type=number] { width: 70px; background: #0f1620; border: 1px solid #2c3a50; color: #d7dee8;
+                            border-radius: 6px; padding: 6px; }
+  #imgPreview { position: relative; display: none; }
+  #imgPreview img { height: 64px; border-radius: 8px; border: 1px solid #2c3a50; }
+  #imgPreview span { position: absolute; top: -6px; right: -6px; background: #c44; color: #fff; border-radius: 50%;
+                     width: 18px; height: 18px; font-size: 12px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  .spin { color: #8fa2bd; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>凌界 LingJieLV · 本地推理台</h1>
+  <div class="sub">上传权重即在本机推理，数据不出本机；支持文字、图片与 KV 缓存加速。</div>
+
+  <div class="card">
+    <h2>1. 加载模型</h2>
+    <div class="row">
+      <label class="file" id="packLabel">选择 mm_pack.pt 权重（必选）
+        <input type="file" id="packFile" accept=".pt,.pth">
+      </label>
+      <label class="file" id="tokLabel">选择 tokenizer.json（可选）
+        <input type="file" id="tokFile" accept=".json">
+      </label>
+      <button id="loadBtn">加载</button>
+    </div>
+    <div id="status">尚未加载模型。</div>
+  </div>
+
+  <div class="card">
+    <h2>2. 对话</h2>
+    <div id="chat"></div>
+    <div class="controls">
+      <div id="imgPreview"><img id="pvImg" alt=""><span id="pvClose">×</span></div>
+      <label class="file" style="flex:0;min-width:auto;padding:10px 14px;">上传图片
+        <input type="file" id="imgFile" accept="image/*">
+      </label>
+      <textarea id="input" rows="1" placeholder="输入问题，Enter 发送，Shift+Enter 换行"></textarea>
+      <label class="opt"><input type="checkbox" id="kv" checked> KV缓存</label>
+      <label class="opt">上限 <input type="number" id="maxNew" value="200" min="1" max="768"></label>
+      <button id="sendBtn" disabled>发送</button>
+      <button id="resetBtn" class="ghost" disabled>清空</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let imageData = null;
+
+function setStatus(text, cls) { const s=$('status'); s.textContent=text; s.className=cls||''; }
+function addMsg(role, html, meta) {
+  const d=document.createElement('div'); d.className='msg '+role; d.innerHTML=html;
+  if (meta) { const m=document.createElement('div'); m.className='meta'; m.textContent=meta; d.appendChild(m); }
+  $('chat').appendChild(d); $('chat').scrollTop=$('chat').scrollHeight; return d;
+}
+
+$('packFile').addEventListener('change', e=>{ $('packLabel').textContent='权重：'+e.target.files[0].name; });
+$('tokFile').addEventListener('change', e=>{ $('tokLabel').textContent='词表：'+e.target.files[0].name; });
+
+$('loadBtn').addEventListener('click', async ()=>{
+  if (!$('packFile').files[0]) { setStatus('请先选择 mm_pack.pt','err'); return; }
+  const fd=new FormData();
+  fd.append('pack', $('packFile').files[0]);
+  if ($('tokFile').files[0]) fd.append('tokenizer', $('tokFile').files[0]);
+  $('loadBtn').disabled=true; setStatus('正在加载权重…');
+  try {
+    const r=await fetch('/api/load',{method:'POST',body:fd}); const j=await r.json();
+    if (!r.ok) throw new Error(j.error);
+    setStatus(`已加载 ${j.variant}｜LM ${j.lm_total}M（激活 ${j.lm_active}M）｜打包 ${j.pack_total}M｜设备 ${j.device}`,'ok');
+    $('sendBtn').disabled=false; $('resetBtn').disabled=false;
+  } catch(e){ setStatus('加载失败：'+e.message,'err'); }
+  $('loadBtn').disabled=false;
+});
+
+$('imgFile').addEventListener('change', e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const rd=new FileReader();
+  rd.onload=()=>{ imageData=rd.result; $('pvImg').src=imageData; $('imgPreview').style.display='block'; };
+  rd.readAsDataURL(f);
+});
+$('pvClose').addEventListener('click', ()=>{ imageData=null; $('imgPreview').style.display='none'; $('imgFile').value=''; });
+
+async function send() {
+  const text=$('input').value.trim();
+  if (!text) return;
+  let html = '';
+  if (imageData) html += '<img src="'+imageData+'">';
+  addMsg('user', html + escapeHtml(text));
+  $('input').value=''; const curImg=imageData;
+  imageData=null; $('imgPreview').style.display='none'; $('imgFile').value='';
+  $('sendBtn').disabled=true;
+  const wait=addMsg('bot','<span class="spin">推理中…</span>');
+  try {
+    const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({message:text,image:curImg,use_kv:$('kv').checked,max_new:+$('maxNew').value})});
+    const j=await r.json();
+    if (!r.ok) throw new Error(j.error);
+    wait.innerHTML = escapeHtml(j.answer||'（无输出）');
+    const m=document.createElement('div'); m.className='meta';
+    m.textContent=`${j.tokens} token · ${j.elapsed}s · ${j.tok_s} tok/s · KV ${$('kv').checked?'开':'关'}`;
+    wait.appendChild(m);
+  } catch(e){ wait.innerHTML='<span style="color:#ff7a7a">出错：'+escapeHtml(e.message)+'</span>'; }
+  $('sendBtn').disabled=false; $('chat').scrollTop=$('chat').scrollHeight;
+}
+
+$('sendBtn').addEventListener('click', send);
+$('input').addEventListener('keydown', e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); send(); } });
+$('resetBtn').addEventListener('click', async ()=>{
+  await fetch('/api/reset',{method:'POST'}); $('chat').innerHTML='';
+});
+function escapeHtml(s){ return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+</script>
+</body>
+</html>

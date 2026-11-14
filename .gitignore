@@ -7,3 +7,4 @@ logs/
 *.bin
 *.pt
 *.parquet
+web/.tmp/
